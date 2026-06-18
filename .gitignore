@@ -1,0 +1,6 @@
+data/
+output/
+__pycache__/
+newsaggregator/__pycache__/
+*.pyc
+.env
