@@ -6,6 +6,28 @@ from datetime import datetime
 from newsaggregator import config, fetcher, search, database, ai_summary, exporter
 
 
+def _ask_selection(results):
+    raw = input("Seleziona gli articoli da salvare (es: 1 3 5), 'tutti', o invio per annullare: ").strip()
+
+    if raw == "":
+        return None
+
+    if raw.lower() == "tutti":
+        return results
+
+    try:
+        indices = [int(x) for x in raw.split()]
+    except ValueError:
+        print("Input non valido.")
+        return None
+
+    if not all(1 <= i <= len(results) for i in indices):
+        print("Input non valido.")
+        return None
+
+    return [results[i - 1] for i in indices]
+
+
 def handle_config(args):
     """Gestisce i sottocomandi di 'config'."""
     if args.config_command == "add":
@@ -17,35 +39,61 @@ def handle_config(args):
     else:
         print("Comando config non riconosciuto. Usa: add, list, remove")
 
+def handle_commands(args):
+    """Stampa la lista di tutti i comandi disponibili con una breve descrizione."""
+    print("""
+Comandi disponibili — NewsAggregator
+=====================================
+
+  python main.py commands
+      Mostra questa lista di comandi.
+
+  python main.py config add <nome> <url>
+      Aggiunge un feed RSS con il nome e l'URL specificati.
+
+  python main.py config list
+      Mostra tutti i feed RSS configurati.
+
+  python main.py config remove <indice>
+      Rimuove il feed RSS all'indice specificato (vedi 'config list').
+
+  python main.py fetch <keyword>
+      Scarica gli articoli dai feed configurati e filtra per keyword.
+
+  python main.py fetch <keyword> --save
+      Come sopra, ma salva i risultati nel database,
+      genera un riassunto AI e produce un PDF nella cartella output/.
+
+  python main.py history
+      Mostra lo storico di tutte le ricerche effettuate.
+
+  python main.py history --keyword <keyword>
+      Filtra lo storico per keyword.
+
+  python main.py history --date <YYYY-MM-DD>
+      Filtra lo storico per data.
+
+  python main.py history --keyword <keyword> --date <YYYY-MM-DD>
+      Combina i due filtri.
+""")
 
 def handle_fetch(args):
-    """
-    Gestisce il comando 'fetch':
-    1. Legge i feed configurati
-    2. Scarica gli articoli
-    3. Filtra per keyword
-    4. Mostra i risultati
-    5. Se --save: salva su db, genera riassunto AI e PDF
-    """
     feeds = config.get_feeds()
     if not feeds:
         print("Nessun feed configurato. Aggiungine uno con: python main.py config add <nome> <url>")
         return
 
-    # Scarica articoli da tutti i feed
     articles = fetcher.fetch_articles(feeds)
     if not articles:
         print("Nessun articolo recuperato.")
         return
 
-    # Filtra per keyword
     results = search.search_articles(articles, args.keyword)
 
     if not results:
         print(f"\nNessun articolo trovato per la keyword '{args.keyword}'.")
         return
 
-    # Mostra i risultati a schermo
     print(f"\nTrovati {len(results)} articoli per '{args.keyword}':\n")
     for i, article in enumerate(results, 1):
         print(f"  [{i}] {article['title']}")
@@ -54,26 +102,23 @@ def handle_fetch(args):
         print()
 
     if args.save:
-        # Genera riassunto con Groq
-        summary = ai_summary.summarize(args.keyword, results)
+        selected = _ask_selection(results)
+        if selected is None:
+            print("Selezione annullata.")
+            return
 
+        summary = ai_summary.summarize(args.keyword, selected)
         if summary:
             print(f"\nRiassunto AI:\n{summary}\n")
 
-        # Salva nel database
         today = datetime.now().strftime("%Y-%m-%d")
-        search_id = database.save_search(args.keyword, results)
+        search_id = database.save_search(args.keyword, selected)
         print(f"Ricerca salvata nel database (id={search_id}).")
 
-        # Genera PDF
-        exporter.export_pdf(args.keyword, today, summary, results)
+        exporter.export_pdf(args.keyword, today, summary, selected)
 
 
 def handle_history(args):
-    """
-    Gestisce il comando 'history':
-    mostra lo storico delle ricerche con filtri opzionali.
-    """
     searches = database.get_searches(keyword=args.keyword, date=args.date)
 
     if not searches:
@@ -84,7 +129,6 @@ def handle_history(args):
     for s in searches:
         print(f"  [id={s['id']}] '{s['keyword']}' — {s['timestamp']}")
 
-    # Se c'è un filtro attivo, mostriamo anche gli articoli
     if args.keyword or args.date:
         print()
         for s in searches:
@@ -127,6 +171,9 @@ def main():
     history_parser.add_argument("--keyword", help="Filtra per keyword")
     history_parser.add_argument("--date", help="Filtra per data (YYYY-MM-DD)")
 
+    # --- commands ---
+    subparsers.add_parser("commands", help="Mostra la lista di tutti i comandi disponibili")
+
     args = parser.parse_args()
 
     if args.command == "config":
@@ -135,5 +182,7 @@ def main():
         handle_fetch(args)
     elif args.command == "history":
         handle_history(args)
+    elif args.command == "commands":
+        handle_commands(args)
     else:
         parser.print_help()
