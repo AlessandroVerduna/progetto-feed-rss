@@ -92,6 +92,12 @@ Tutti i comandi si eseguono dalla cartella radice del progetto con:
 python main.py <comando>
 ```
 
+### Lista dei comandi disponibili
+
+```bash
+python main.py commands
+```
+
 ### Gestione dei feed RSS
 
 ```bash
